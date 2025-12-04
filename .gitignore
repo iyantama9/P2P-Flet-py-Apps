@@ -1,0 +1,19 @@
+# Python virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS-generated files
+.DS_Store
+
+# Flet build artifacts (if any in the future)
+/assets/app/
+
+# IDE configuration
+.idea/
+.vscode/
+
+# Dependency lock file
+uv.lock

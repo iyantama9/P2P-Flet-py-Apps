@@ -1,41 +1,77 @@
 import flet as ft
 
-# Callback to be set by the main application logic
 on_send_message_click = None
-on_typing_change = None # New callback
+on_typing_change = None
 
-# UI Components that need to be accessed from the main app
-messages = ft.Column(auto_scroll=True, expand=True)
-new_message = ft.TextField(
-    hint_text="Type a message...", 
+messages = ft.ListView(
     expand=True,
-    # Call the new callback whenever the content changes
-    on_change=lambda e: on_typing_change(e.data) if on_typing_change else None
+    auto_scroll=True,
+    spacing=10,
+    padding=10,
 )
-status_text = ft.Text()
-# New UI element to show the typing status of the peer
-typing_indicator = ft.Text(value="", italic=True, size=12)
 
-def ChatView() -> ft.Column:
-    """Returns the UI for the main chat view."""
-    
+new_message = ft.TextField(
+    hint_text="Type a message...",
+    expand=True,
+    filled=True,
+    border_color=ft.Colors.TRANSPARENT,
+    border_radius=20,
+    on_change=lambda e: on_typing_change(e.data) if on_typing_change else None,
+)
+
+status_text = ft.Text(
+    weight=ft.FontWeight.BOLD,
+    text_align=ft.TextAlign.CENTER,
+)
+
+typing_indicator = ft.Text(
+    value="",
+    italic=True,
+    size=12,
+    color=ft.Colors.GREY_600,
+    text_align=ft.TextAlign.RIGHT
+)
+
+
+def ChatView() -> ft.Container:
     send_button = ft.IconButton(
-        icon=ft.icons.SEND, 
-        on_click=lambda e: on_send_message_click(e) if on_send_message_click else None, 
-        disabled=True # Initially disabled
+        icon=ft.Icons.SEND_ROUNDED,
+        tooltip="Send",
+        disabled=True,
+        on_click=lambda e: on_send_message_click(e) if on_send_message_click else None,
     )
-    
+
     ChatView.send_button = send_button
 
-    return ft.Column([
-        status_text,
-        ft.Container(
-            content=messages, 
-            border=ft.border.all(1, "grey"), 
-            border_radius=5, 
-            padding=10, 
-            expand=True
+    chat_box = ft.Container(
+        content=messages,
+        padding=15,
+        bgcolor=ft.Colors.TRANSPARENT,
+        border=ft.border.all(1, ft.Colors.GREY_300),
+        border_radius=10,
+        expand=True,  
+    )
+
+    return ft.Container(
+        padding=20,
+        visible=False, 
+        content=ft.Column(
+            spacing=12,
+            expand=True,
+            controls=[
+                ft.Row([status_text], alignment=ft.MainAxisAlignment.CENTER),
+
+                chat_box,
+
+                typing_indicator,
+
+                ft.Row(
+                    vertical_alignment=ft.CrossAxisAlignment.CENTER,
+                    controls=[
+                        new_message,
+                        send_button,
+                    ],
+                ),
+            ],
         ),
-        typing_indicator, # Add the indicator to the layout
-        ft.Row([new_message, send_button])
-    ], expand=True, visible=False) # Initially hidden
+    )

@@ -1,95 +1,90 @@
-from cryptography.fernet import Fernet
+import os
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives.asymmetric import dh
 from cryptography.hazmat.primitives.serialization import (
+    load_pem_public_key,
+    load_pem_parameters,
     Encoding,
     PublicFormat,
-    load_pem_public_key,
+    ParameterFormat
 )
 
-# This module will hold the global cipher suite instance
 cipher_suite = None
-# Global state for the local Diffie-Hellman private key
 dh_private_key = None
 
-def generate_dh_keys() -> tuple[any, bytes]:
+PARAMS_PATH = "dh_params.pem"
+
+def get_dh_parameters() -> dh.DHParameters:
     """
-    Generates a new Diffie-Hellman key pair.
-    This is the first step for both Host and Joiner.
-    It generates the common parameters, a private key, and a public key.
-    
-    Returns:
-        A tuple containing the private key object (to be kept secret) and
-        the public key bytes (to be sent to the peer).
+    Loads DH parameters from file if it exists, otherwise generates and saves them.
+    """
+    if os.path.exists(PARAMS_PATH):
+        with open(PARAMS_PATH, "rb") as f:
+            return load_pem_parameters(f.read())
+    else:
+        print(f"First time setup: Generating DH parameters (this may take a moment)...")
+        params = dh.generate_parameters(generator=2, key_size=2048)
+        pem_data = params.parameter_bytes(Encoding.PEM, ParameterFormat.PKCS3)
+        with open(PARAMS_PATH, "wb") as f:
+            f.write(pem_data)
+        print("DH parameters saved to dh_params.pem")
+        return params
+
+parameters = get_dh_parameters()
+
+def generate_dh_keys() -> tuple[dh.DHPrivateKey, bytes]:
+    """
+    Generates a private key for the DH key exchange and the corresponding public key.
     """
     global dh_private_key
-    # Generate parameters for the key exchange.
-    # In a real-world application, these might be pre-generated and hardcoded
-    # for efficiency, but generating them on the fly is also secure.
-    # The generator (g) and prime (p) are not secret.
-    parameters = dh.generate_parameters(generator=2, key_size=2048)
-    
-    # Generate our private key. This is SECRET.
     dh_private_key = parameters.generate_private_key()
-    
-    # Generate our public key. This is meant to be shared.
     public_key_bytes = dh_private_key.public_key().public_bytes(
         Encoding.PEM, PublicFormat.SubjectPublicKeyInfo
     )
-    
     return dh_private_key, public_key_bytes
 
 def establish_secure_channel(peer_public_key_bytes: bytes) -> tuple[bool, str | None]:
     """
-    Establishes the final symmetric encryption key using our private key
-    and the peer's public key. This is the final step of the DH exchange.
-
-    Args:
-        peer_public_key_bytes: The public key received from the peer.
-
-    Returns:
-        A tuple (success: bool, error_message: str | None).
+    Establishes the final symmetric encryption key using our private key and the peer's public key.
     """
     global cipher_suite
     try:
         if dh_private_key is None:
-            return False, "Local DH private key is not available. Call generate_dh_keys first."
+            return False, "Local DH private key is not available."
 
-        # Load the peer's public key from its byte representation.
         peer_public_key = load_pem_public_key(peer_public_key_bytes)
-
-        # Compute the shared secret. This is the magic of Diffie-Hellman.
-        # This secret is generated on both sides without ever being transmitted.
         shared_secret = dh_private_key.exchange(peer_public_key)
 
-        # Derive a 32-byte key suitable for Fernet using a standard KDF.
-        # A Key Derivation Function (KDF) like HKDF is crucial to turn the
-        # shared secret into a cryptographically strong symmetric key.
         derived_key = HKDF(
             algorithm=hashes.SHA256(),
             length=32,
             salt=None,
-            info=b'p2p-chat-key-derivation-info', # A fixed, non-secret info string
+            info=b'p2p-chat-key',
         ).derive(shared_secret)
 
-        # Initialize the Fernet cipher suite with the newly derived key.
-        cipher_suite = Fernet(derived_key)
+        cipher_suite = AESGCM(derived_key)
         return True, None
-
     except Exception as e:
-        cipher_suite = None
-        return False, f"Failed to establish secure channel: {e}"
+        return False, f"Error computing shared key: {e}"
 
-
-def encrypt_message(message: str) -> bytes:
-    """Encrypts a string message using the established channel."""
+def encrypt_message(message: str) -> bytes | None:
+    """Encrypts a message using the established secure channel."""
     if not cipher_suite:
-        raise ValueError("Cipher suite not initialized. Key exchange has not completed.")
-    return cipher_suite.encrypt(message.encode())
+        return None
+    nonce = os.urandom(12)
+    ciphertext = cipher_suite.encrypt(nonce, message.encode('utf-8'), None)
+    return nonce + ciphertext
 
-def decrypt_message(encrypted_message: bytes) -> str:
-    """Decrypts a byte message using the established channel."""
+def decrypt_message(encrypted_message: bytes) -> str | None:
+    """Decrypts a message using the established secure channel."""
     if not cipher_suite:
-        raise ValueError("Cipher suite not initialized. Key exchange has not completed.")
-    return cipher_suite.decrypt(encrypted_message).decode()
+        return None
+    try:
+        nonce = encrypted_message[:12]
+        ciphertext = encrypted_message[12:]
+        decrypted_bytes = cipher_suite.decrypt(nonce, ciphertext, None)
+        return decrypted_bytes.decode('utf-8')
+    except Exception:
+        return None
